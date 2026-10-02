@@ -39,15 +39,3 @@ Observatory turns a session file into something you can explore.
 | Auth | Auth.js with GitHub sign-in |
 | Tests | Vitest (unit), Playwright (end-to-end) |
 | CI / hosting | GitHub Actions, Vercel (preview deployment per pull request) |
-
-## How it's built
-
-This project is also a training ground for an agentic development team, with a
-specialised agent for each stage of the work:
-
-- **Scrum master:** refines the backlog and plans sprints.
-- **Developer:** implements one slice per ticket and verifies it with the repository's own checks.
-- **Code reviewer:** reviews every pull request before it is merged.
-- **Debugger:** investigates failures, testing one hypothesis at a time.
-
-Every change goes through a pull request and a human merge.
