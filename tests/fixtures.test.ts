@@ -4,7 +4,11 @@ import { describe, expect, it } from "vitest"
 
 const ROOT = join(__dirname, "..", "fixtures")
 
-const HOME_PATH = /\/(?:home|Users)\/([^/\s"'\\]+)\//g
+// Unix-style home directories; the name may be empty (e.g. a bare `/home/`).
+const HOME_PATH = /(?<![A-Za-z0-9_.-])\/(?:home|Users)\/([^/\s"'\\]*)/g
+const ROOT_HOME = /(?<![A-Za-z0-9_.-])\/root(?![A-Za-z0-9_-])/g
+// Windows home directories, with one to four backslashes (JSON escaping).
+const WIN_HOME = /[A-Za-z]:\\{1,4}Users\\{0,4}([^\\/\s"']*)/g
 const EMAIL = /[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)/g
 const SECRET_PATTERNS: Record<string, RegExp> = {
   "sk- key": /\bsk[-_][A-Za-z0-9_-]{20,}/,
@@ -14,7 +18,11 @@ const SECRET_PATTERNS: Record<string, RegExp> = {
   "AWS access key": /AKIA[0-9A-Z]{16}/,
   "Slack token": /xox[baprs]-/,
   "PEM block": /-----BEGIN/,
-  "generic secret": /(api[_-]?key|token|secret)["':= ]+[A-Za-z0-9_-]{20,}/i,
+  // The value must contain a digit so long snake_case identifiers do not match.
+  "generic secret": /(api[_-]?key|token|secret)[\\"':= ]+(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{20,}/i,
+  JWT: /eyJ[A-Za-z0-9_-]{10,}\./,
+  "Google API key": /AIza[0-9A-Za-z_-]{35}/,
+  "bearer token": /Bearer\s+[A-Za-z0-9._-]{16,}/,
 }
 const ALLOWED_HOME_NAME = "dev"
 const ALLOWED_EMAIL_DOMAINS = ["example.com", "example.org"]
@@ -24,6 +32,10 @@ function findViolations(text: string): string[] {
   for (const m of text.matchAll(HOME_PATH)) {
     if (m[1] !== ALLOWED_HOME_NAME) found.push(`home path: ${m[0]}`)
   }
+  for (const m of text.matchAll(WIN_HOME)) {
+    if (m[1] !== ALLOWED_HOME_NAME) found.push(`windows home path: ${m[0]}`)
+  }
+  for (const m of text.matchAll(ROOT_HOME)) found.push(`home path: ${m[0]}`)
   for (const m of text.matchAll(EMAIL)) {
     if (!ALLOWED_EMAIL_DOMAINS.includes(m[1].toLowerCase())) found.push(`email: ${m[0]}`)
   }
@@ -84,7 +96,16 @@ describe("fixture hygiene", () => {
   it("scanner flags planted violations", () => {
     expect(findViolations("/home/alice/project")).toHaveLength(1)
     expect(findViolations("/Users/bob/project")).toHaveLength(1)
-    expect(findViolations("/home/dev/project")).toEqual([])
+    expect(findViolations('"cwd":"/home/alice"')).toHaveLength(1)
+    expect(findViolations('"cwd":"/home/"')).toHaveLength(1)
+    expect(findViolations('"cwd":"/root"')).toHaveLength(1)
+    expect(findViolations("/root/.config")).toHaveLength(1)
+    expect(findViolations("C:\\Users\\bob\\x")).toHaveLength(1)
+    expect(findViolations("C:\\\\Users\\\\bob")).toHaveLength(1)
+    expect(findViolations("C:\\\\\\\\Users\\\\\\\\bob")).toHaveLength(1)
+    expect(findViolations("/home/dev/projects/x")).toEqual([])
+    expect(findViolations('"cwd":"/home/dev"')).toEqual([])
+    expect(findViolations("/var/root-cache")).toEqual([])
     expect(findViolations("someone@corp.test")).toHaveLength(1)
     expect(findViolations("someone@example.com")).toEqual([])
     expect(findViolations("ghp_" + "a".repeat(10))).not.toEqual([])
@@ -92,7 +113,18 @@ describe("fixture hygiene", () => {
     expect(findViolations("AKIA" + "A".repeat(16))).not.toEqual([])
     expect(findViolations("xoxb-1")).not.toEqual([])
     expect(findViolations("-----BEGIN KEY")).not.toEqual([])
-    expect(findViolations('"api_key": "' + "a".repeat(24) + '"')).not.toEqual([])
+    expect(findViolations('"api_key": "' + "a".repeat(23) + '1"')).not.toEqual([])
+    // JSON-escaped separator
+    expect(findViolations('\\"token\\":\\"' + "a".repeat(23) + '1\\"')).not.toEqual([])
+    // identifiers without digits are not secrets
+    expect(findViolations("secret = some_long_identifier_name")).toEqual([])
+    expect(findViolations("token: " + "a".repeat(30))).toEqual([])
+    expect(findViolations("eyJhbGciOiJIUzI1NiJ9.payload")).not.toEqual([])
+    expect(findViolations("eyJ")).toEqual([])
+    expect(findViolations("AIza" + "a".repeat(35))).not.toEqual([])
+    expect(findViolations("AIza" + "a".repeat(10))).toEqual([])
+    expect(findViolations("Authorization: Bearer " + "a".repeat(20))).not.toEqual([])
+    expect(findViolations("Bearer short")).toEqual([])
   })
 })
 
@@ -101,11 +133,74 @@ describe("fixture structure", () => {
     expect(parse(f).malformed).toBe(MALFORMED_ALLOWED[name] ?? 0)
   })
 
-  it.each(jsonlFiles.map((f) => [rel(f), f]))("%s: entries chain by parentUuid", (_n, f) => {
+  it.each(jsonlFiles.map((f) => [rel(f), f]))("%s: parentUuid is null first, then an earlier uuid", (_n, f) => {
     const { entries } = parse(f)
+    const seen = new Set<string>()
     entries.forEach((e, i) => {
-      expect(e.parentUuid).toBe(i === 0 ? null : entries[i - 1].uuid)
+      if (i === 0) expect(e.parentUuid).toBeNull()
+      else expect(seen.has(e.parentUuid)).toBe(true)
+      seen.add(e.uuid)
     })
+  })
+
+  it.each(jsonlFiles.map((f) => [rel(f), f]))("%s: uuids are unique v4 and timestamps do not decrease", (_n, f) => {
+    const { entries } = parse(f)
+    const v4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    for (const e of entries) {
+      expect(e.uuid).toMatch(v4)
+      expect(e.sessionId).toMatch(v4)
+    }
+    expect(new Set(entries.map((e) => e.uuid)).size).toBe(entries.length)
+    const ts = entries.map((e) => Date.parse(e.timestamp))
+    ts.forEach((t, i) => {
+      expect(Number.isNaN(t)).toBe(false)
+      if (i > 0) expect(t).toBeGreaterThanOrEqual(ts[i - 1])
+    })
+  })
+
+  it.each(jsonlFiles.map((f) => [rel(f), f]))("%s: cache_read_input_tokens does not decrease", (_n, f) => {
+    const reads = parse(f).entries.filter((e) => e.message?.usage).map((e) => e.message.usage.cache_read_input_tokens as number)
+    reads.forEach((r, i) => {
+      if (i > 0) expect(r).toBeGreaterThanOrEqual(reads[i - 1])
+    })
+  })
+
+  it.each(mainLogs.map((f) => [rel(f), f]))("%s: Agent calls pair with an existing subagent file and its time window", (name, f) => {
+    const entries = parse(f).entries
+    const uses = entries.filter((e) => e.type === "assistant").flatMap((e) =>
+      blocks(e).filter((b) => b.name === "Agent").map((b) => ({ id: b.id as string, at: Date.parse(e.timestamp) })))
+    const agentIds: string[] = []
+    for (const u of uses) {
+      const res = entries.find((e) => blocks(e).some((b) => b.type === "tool_result" && b.tool_use_id === u.id))
+      expect(res).toBeDefined()
+      const agentId = res!.toolUseResult.agentId as string
+      agentIds.push(agentId)
+      const sub = subagentLogs.find((s) => rel(s) === name.replace(/\.jsonl$/, `/subagents/agent-${agentId}.jsonl`))
+      expect(sub).toBeDefined()
+      const ts = parse(sub!).entries.map((e) => Date.parse(e.timestamp))
+      expect(ts[0]).toBeGreaterThan(u.at)
+      expect(ts[ts.length - 1]).toBeLessThan(Date.parse(res!.timestamp))
+    }
+    const dir = name.replace(/\.jsonl$/, "/subagents/")
+    expect(subagentLogs.filter((s) => rel(s).startsWith(dir))).toHaveLength(agentIds.length)
+  })
+
+  it("with-subagents covers parallel calls, a split message and a branch", () => {
+    const entries = parse(join(ROOT, "sessions/with-subagents.jsonl")).entries
+    // parallel: one assistant entry with two tool_use blocks answered by one user entry with two results
+    const parallel = entries.find((e) => e.type === "assistant" && blocks(e).filter((b) => b.type === "tool_use").length === 2)
+    expect(parallel).toBeDefined()
+    const ids = blocks(parallel!).filter((b) => b.type === "tool_use").map((b) => b.id)
+    const answer = entries.find((e) => blocks(e).some((b) => b.type === "tool_result" && b.tool_use_id === ids[0]))
+    expect(blocks(answer!).filter((b) => b.type === "tool_result").map((b) => b.tool_use_id)).toEqual(ids)
+    // split message: consecutive entries share message.id and usage
+    const split = entries.some((e, i) => i > 0 && e.type === "assistant" && entries[i - 1].type === "assistant"
+      && e.message.id === entries[i - 1].message.id
+      && JSON.stringify(e.message.usage) === JSON.stringify(entries[i - 1].message.usage))
+    expect(split).toBe(true)
+    // branch: two entries with the same parent
+    const parents = entries.map((e) => e.parentUuid).filter((p) => p !== null)
+    expect(new Set(parents).size).toBeLessThan(parents.length)
   })
 
   it.each(mainLogs.map((f) => [rel(f), f]))("%s: sessionId is consistent, including subagent files", (name, f) => {

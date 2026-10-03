@@ -34,9 +34,34 @@ One JSON object per line.
 | File | Entries | Purpose |
 | --- | --- | --- |
 | `sessions/small.jsonl` | 10 | One prompt, thinking, four tool calls, a final reply. |
-| `sessions/with-subagents.jsonl` | 14 | Two subagents (files in `sessions/with-subagents/subagents/`); one subagent has a failed tool call. Also a `system` and an `attachment` entry. |
+| `sessions/with-subagents.jsonl` | 18 | Two subagents (files in `sessions/with-subagents/subagents/`); one subagent has a failed tool call. Also a `system` and an `attachment` entry, a parallel-call turn, a split assistant message and a branch (see below). |
 | `sessions/failed-tools.jsonl` | 14 | Three errored tool results, plus one final tool call with no result (the session ends mid-run). |
-| `sessions/edge-cases.jsonl` | 9 lines | One malformed (non-JSON) line, one unknown entry type (`telemetry-ping`), one empty text block, one assistant entry without `usage`. |
+| `sessions/edge-cases.jsonl` | 9 lines | One malformed (non-JSON) line, one unknown entry type (`telemetry-ping`), one assistant entry whose content is an empty text block followed by a text block (`stop_reason: null`), one assistant entry without `usage`. |
 
 Every `tool_use` id has exactly one later `tool_result`, except the interrupted
 call at the end of `failed-tools.jsonl`.
+
+## Shapes covered
+
+All in `sessions/with-subagents.jsonl`:
+
+- Parallel calls: one assistant entry with two `tool_use` blocks, answered by a
+  single user entry with two `tool_result` blocks.
+- Split message: one assistant message spread over two consecutive entries that
+  share the same `message.id` and an identical `usage` object. Usage must be
+  counted once per message, not once per entry.
+- Branch: two entries with the same `parentUuid` (a discarded draft turn and
+  its retry).
+
+## Usage values
+
+Token counts in `usage` are illustrative, not measured. `cache_read_input_tokens`
+grows through a session and `output_tokens` roughly follows the size of the
+turn's text and tool input.
+
+## Editing fixtures
+
+Fixtures are hand-maintained static files. Any change must keep `pnpm test`
+(`tests/fixtures.test.ts`) green. Large generated fixtures needed later, for
+example for performance tests, belong in a committed, seeded generator script,
+not in hand-written files.
