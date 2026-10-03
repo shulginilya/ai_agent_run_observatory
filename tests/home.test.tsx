@@ -1,9 +1,9 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { ThemeProvider } from "next-themes"
 import { beforeAll, beforeEach, describe, expect, it } from "vitest"
 
 import Home from "@/app/page"
+import { ThemeProvider } from "@/components/theme-provider"
 
 beforeAll(() => {
   window.matchMedia = (query: string) =>
@@ -26,7 +26,7 @@ beforeEach(() => {
 
 function renderHome() {
   return render(
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+    <ThemeProvider>
       <Home />
     </ThemeProvider>,
   )
