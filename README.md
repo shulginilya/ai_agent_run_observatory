@@ -4,10 +4,6 @@ Upload an AI coding agent's session log and see what the agent actually did: a t
 prompts, replies and tool calls, the subagents it spawned, where it failed, and what it
 cost in tokens.
 
-> **Status: planning complete, development not started.** The backlog and sprint plan
-> are in place, and Sprint 1 starts on 5 October 2026. Nothing below is built yet; it
-> describes what the project will deliver.
-
 ## Why
 
 AI coding agents record every session as a `.jsonl` log. These logs show exactly how an
