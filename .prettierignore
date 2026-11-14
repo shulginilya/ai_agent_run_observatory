@@ -1,0 +1,11 @@
+# Lockfile and generated output
+pnpm-lock.yaml
+.next/
+out/
+build/
+coverage/
+next-env.d.ts
+*.tsbuildinfo
+
+# Sanitized session logs are kept byte-for-byte as captured
+fixtures/sessions/
