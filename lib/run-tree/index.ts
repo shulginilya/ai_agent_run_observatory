@@ -43,7 +43,11 @@ const time = (ts: string | null) => {
   return Number.isNaN(ms) ? null : ms
 }
 
-function buildRun(runId: string | null, entries: Entry[]): RunTree {
+// The run's tree, and each paired call by the id of its result entry.
+function buildRun(
+  runId: string | null,
+  entries: Entry[],
+): { tree: RunTree; callByResult: Map<string, TreeNode> } {
   const nodes = new Map<string, TreeNode>()
   const order = new Map<TreeNode, number>()
   entries.forEach((entry, i) => {
@@ -81,11 +85,24 @@ function buildRun(runId: string | null, entries: Entry[]): RunTree {
   roots.forEach(reach)
   for (const node of nodes.values()) {
     if (reached.has(node)) continue
-    const parent = parentOf.get(node)!
-    parent.children = parent.children.filter((c) => c !== node)
-    node.brokenParent = true
-    roots.push(node)
-    reach(node)
+    // Climb until a node repeats: it is on the loop. Cut the loop at its
+    // member that comes first in the file.
+    const seen = new Set<TreeNode>()
+    let at = node
+    while (!seen.has(at)) {
+      seen.add(at)
+      at = parentOf.get(at)!
+    }
+    let cut = at
+    for (let m = parentOf.get(at)!; m !== at; m = parentOf.get(m)!) {
+      if (order.get(m)! < order.get(cut)!) cut = m
+    }
+    const parent = parentOf.get(cut)!
+    parent.children = parent.children.filter((c) => c !== cut)
+    parentOf.delete(cut)
+    cut.brokenParent = true
+    roots.push(cut)
+    reach(cut)
   }
 
   // Siblings by time, file order breaking ties. An untimed entry takes the
@@ -107,6 +124,7 @@ function buildRun(runId: string | null, entries: Entry[]): RunTree {
 
   // Pair calls and results by call id within this run. A repeated id pairs
   // in file order: each result goes to the earliest unpaired call before it.
+  const callByResult = new Map<string, TreeNode>()
   const callsById = new Map<string, TreeNode[]>()
   for (const node of nodes.values()) {
     if (node.entry.kind !== "tool_call") continue
@@ -125,6 +143,7 @@ function buildRun(runId: string | null, entries: Entry[]): RunTree {
     }
     const callAt = time(call.entry.timestamp)
     const resultAt = time(node.entry.timestamp)
+    callByResult.set(node.entry.id, call)
     call.pairing = {
       status: node.entry.isError ? "error" : "ok",
       result: node.entry,
@@ -138,7 +157,7 @@ function buildRun(runId: string | null, entries: Entry[]): RunTree {
     }
   }
 
-  return { runId, roots: sortedRoots }
+  return { tree: { runId, roots: sortedRoots }, callByResult }
 }
 
 export function buildRunTree(session: Session): SessionTree {
@@ -149,16 +168,9 @@ export function buildRunTree(session: Session): SessionTree {
     byRun.set(entry.runId, list)
   }
 
-  const runTree = (id: string) => buildRun(id, byRun.get(id) ?? [])
-  const main = buildRun(null, byRun.get(null) ?? [])
-
+  const runTree = (id: string) => buildRun(id, byRun.get(id) ?? []).tree
   // A subagent run hangs under the call whose result reported it.
-  const callByResult = new Map<string, TreeNode>()
-  const walk = (node: TreeNode) => {
-    if (node.pairing?.result) callByResult.set(node.pairing.result.id, node)
-    node.children.forEach(walk)
-  }
-  main.roots.forEach(walk)
+  const { tree: main, callByResult } = buildRun(null, byRun.get(null) ?? [])
 
   const unattachedRuns: RunTree[] = []
   for (const run of session.runs) {
