@@ -8,6 +8,7 @@ import { migrate } from "drizzle-orm/postgres-js/migrator"
 import postgres from "postgres"
 
 import { requireDatabaseUrl } from "../lib/db/env.ts"
+import { describeError } from "../lib/db/errors.ts"
 
 // Same files Next.js reads; variables already set in the shell win, and
 // .env.local wins over .env.
@@ -35,6 +36,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`db:migrate: ${(error as Error).message}`)
+  console.error(`db:migrate: ${describeError(error)}`)
   process.exit(1)
 })
