@@ -13,7 +13,7 @@ export type DraftEntry = DistributiveOmit<
 >
 
 export type MappedRecord = {
-  recordId: string
+  recordId: string | null
   // The parent record's id as the log gives it.
   parentRecordId: string | null
   sessionId: string | null

@@ -18,10 +18,12 @@ export type MessageInfo = {
 }
 
 type Base = {
-  // Unique within the session: `<recordId>:<block index>`.
+  // Unique within the session: `<run>:<line>:<block index>`, where run is
+  // "main" or the subagent run id.
   id: string
-  // The id of the log record this entry came from.
-  recordId: string
+  // The id the log gives the record this entry came from; null when the
+  // record has none.
+  recordId: string | null
   // The entry this one follows: the previous block of the same record, or the
   // last entry of the parent record. Null for the first entry of a run.
   parentId: string | null
@@ -93,6 +95,7 @@ export type ParseWarning = {
     | "missing-subagent-log"
     | "unspawned-subagent-log"
     | "unknown-parent"
+    | "duplicate-record"
   message: string
   line?: number
   runId?: string
