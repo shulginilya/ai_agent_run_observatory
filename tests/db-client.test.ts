@@ -29,7 +29,7 @@ describe("app start-up", () => {
       .mockImplementation(() => undefined as never)
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const { register } = await import("@/instrumentation")
-    register()
+    await register()
     expect(error).toHaveBeenCalledWith(expect.stringMatching(/DATABASE_URL/))
     expect(exit).toHaveBeenCalledWith(1)
     exit.mockRestore()
@@ -43,7 +43,21 @@ describe("app start-up", () => {
       .spyOn(process, "exit")
       .mockImplementation(() => undefined as never)
     const { register } = await import("@/instrumentation")
-    register()
+    await register()
+    expect(exit).not.toHaveBeenCalled()
+    exit.mockRestore()
+  })
+})
+
+describe("app start-up on the Edge runtime", () => {
+  it("does not check or exit there; the Node.js server does", async () => {
+    vi.stubEnv("DATABASE_URL", "")
+    vi.stubEnv("NEXT_RUNTIME", "edge")
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation(() => undefined as never)
+    const { register } = await import("@/instrumentation")
+    await expect(register()).resolves.toBeUndefined()
     expect(exit).not.toHaveBeenCalled()
     exit.mockRestore()
   })
