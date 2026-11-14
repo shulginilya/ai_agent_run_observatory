@@ -260,3 +260,126 @@ describe("subagent runs", () => {
     expect(t.unattachedRuns[0].roots.length).toBeGreaterThan(0)
   })
 })
+
+describe("hostile shapes", () => {
+  const call = (
+    id: string,
+    callId: string,
+    ts: string,
+    parentId: string | null = null,
+  ) =>
+    ({
+      id,
+      kind: "tool_call",
+      callId,
+      name: "T",
+      input: {},
+      parentId,
+      timestamp: ts,
+      message: { id: null, model: null, usage: null },
+    }) as Partial<Entry>
+  const result = (
+    id: string,
+    callId: string,
+    ts: string,
+    parentId: string | null = null,
+  ) =>
+    ({
+      id,
+      kind: "tool_result",
+      callId,
+      output: "",
+      isError: false,
+      subagentRunId: null,
+      parentId,
+      timestamp: ts,
+    }) as Partial<Entry>
+
+  it("keeps entries caught in a parent loop, as roots", () => {
+    const tree = buildRunTree(
+      session([
+        { id: "a" },
+        { id: "b", parentId: "c" },
+        { id: "c", parentId: "b" },
+        { id: "d", parentId: "d" },
+      ]),
+    ).main
+    const ids = nodesOf(tree)
+      .map((n) => n.entry.id)
+      .sort()
+    expect(ids).toEqual(["a", "b", "c", "d"])
+    expect(tree.roots.map((n) => n.entry.id)).toEqual(["a", "b", "d"])
+    expect(
+      tree.roots.filter((n) => n.brokenParent).map((n) => n.entry.id),
+    ).toEqual(["b", "d"])
+  })
+
+  it("pairs repeated call ids in order and never with a later call", () => {
+    const tree = buildRunTree(
+      session([
+        call("c1", "", "2025-01-01T00:00:01Z"),
+        result("r1", "", "2025-01-01T00:00:02Z", "c1"),
+        call("c2", "", "2025-01-01T00:00:10Z", "r1"),
+      ]),
+    ).main
+    const calls = find(tree, (e) => e.kind === "tool_call")
+    expect(
+      calls.map((n) => [n.entry.id, n.pairing?.status, n.pairing?.durationMs]),
+    ).toEqual([
+      ["c1", "ok", 1000],
+      ["c2", "no-result", null],
+    ])
+  })
+
+  it("pairs the first result of a call and flags a second one as an orphan", () => {
+    const tree = buildRunTree(
+      session([
+        call("c", "x", "2025-01-01T00:00:01Z"),
+        result("r1", "x", "2025-01-01T00:00:02Z", "c"),
+        result("r2", "x", "2025-01-01T00:00:03Z", "r1"),
+      ]),
+    ).main
+    const [c] = find(tree, (e) => e.id === "c")
+    expect(c.pairing?.result?.id).toBe("r1")
+    expect(
+      find(tree, (e) => e.kind === "tool_result").map((n) => [
+        n.entry.id,
+        !!n.orphan,
+      ]),
+    ).toEqual([
+      ["r1", false],
+      ["r2", true],
+    ])
+  })
+
+  it("orders timestamped siblings by time even with an untimed one between them", () => {
+    const tree = buildRunTree(
+      session([
+        { id: "root" },
+        { id: "t3", parentId: "root", timestamp: "2025-01-01T00:00:03Z" },
+        { id: "none", parentId: "root", timestamp: null },
+        { id: "t1", parentId: "root", timestamp: "2025-01-01T00:00:01Z" },
+      ]),
+    ).main
+    const order = tree.roots[0].children.map((n) => n.entry.id)
+    expect(order.indexOf("t1")).toBeLessThan(order.indexOf("t3"))
+    expect(order.indexOf("t3")).toBeLessThan(order.indexOf("none"))
+  })
+
+  it("orders roots by time", () => {
+    const tree = buildRunTree(
+      session([
+        { id: "late", timestamp: "2025-01-01T00:00:05Z" },
+        { id: "early", parentId: "nowhere", timestamp: "2025-01-01T00:00:01Z" },
+      ]),
+    ).main
+    expect(tree.roots.map((n) => n.entry.id)).toEqual(["early", "late"])
+  })
+
+  it("flags no paired result as an orphan", () => {
+    const tree = buildRunTree(parseSession(read("small.jsonl"))).main
+    const results = find(tree, (e) => e.kind === "tool_result")
+    expect(results).toHaveLength(4)
+    expect(results.every((n) => !n.orphan)).toBe(true)
+  })
+})
