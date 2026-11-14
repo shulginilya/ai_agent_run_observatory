@@ -43,7 +43,11 @@ function userEntries(record: Rec, timestamp: string | null): DraftEntry[] {
   const toolUseResult = isObject(record.toolUseResult)
     ? record.toolUseResult
     : null
-  const subagentRunId = str(toolUseResult?.agentId)
+  // `toolUseResult` describes the record, not a block: it can only be tied to
+  // a result when the record holds exactly one.
+  const results = content.filter((b) => isObject(b) && b.type === "tool_result")
+  const subagentRunId =
+    results.length === 1 ? str(toolUseResult?.agentId) : null
   const entries: DraftEntry[] = []
   for (const block of content) {
     if (!isObject(block)) continue
@@ -81,10 +85,14 @@ function assistantEntries(record: Rec, timestamp: string | null): DraftEntry[] {
         message: info,
         timestamp,
       })
-    } else if (block.type === "thinking" && str(block.thinking)?.trim()) {
+    } else if (
+      block.type === "thinking" ||
+      block.type === "redacted_thinking"
+    ) {
+      // Redacted or empty reasoning is still reasoning, not an empty reply.
       entries.push({
         kind: "reasoning",
-        text: str(block.thinking)!,
+        text: str(block.thinking) ?? "",
         message: info,
         timestamp,
       })
@@ -146,7 +154,7 @@ export const sessionJsonl: FormatAdapter = {
         entries = [{ kind: "other", recordType: str(record.type), timestamp }]
     }
     return {
-      recordId: str(record.uuid) ?? "",
+      recordId: str(record.uuid),
       parentRecordId: str(record.parentUuid),
       sessionId: str(record.sessionId),
       entries,

@@ -22,31 +22,38 @@ type Line = { line: number; record: Record<string, unknown> }
 
 function readLines(text: string, warnings: ParseWarning[], runId?: string) {
   const lines: Line[] = []
-  text.split(/\r?\n/).forEach((raw, i) => {
-    if (!raw.trim()) return
-    let value: unknown
-    try {
-      value = JSON.parse(raw)
-    } catch {
-      warnings.push({
-        code: "malformed-line",
-        line: i + 1,
-        ...(runId ? { runId } : {}),
-        message: `Line ${i + 1}${runId ? ` of subagent log ${runId}` : ""} is not valid JSON; skipped.`,
-      })
-      return
-    }
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-      lines.push({ line: i + 1, record: value as Record<string, unknown> })
-    } else {
-      warnings.push({
-        code: "malformed-line",
-        line: i + 1,
-        ...(runId ? { runId } : {}),
-        message: `Line ${i + 1} is not a JSON object; skipped.`,
-      })
-    }
-  })
+  text
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .forEach((raw, i) => {
+      if (!raw.trim()) return
+      let value: unknown
+      try {
+        value = JSON.parse(raw)
+      } catch {
+        warnings.push({
+          code: "malformed-line",
+          line: i + 1,
+          ...(runId ? { runId } : {}),
+          message: `Line ${i + 1}${runId ? ` of subagent log ${runId}` : ""} is not valid JSON; skipped.`,
+        })
+        return
+      }
+      if (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value)
+      ) {
+        lines.push({ line: i + 1, record: value as Record<string, unknown> })
+      } else {
+        warnings.push({
+          code: "malformed-line",
+          line: i + 1,
+          ...(runId ? { runId } : {}),
+          message: `Line ${i + 1} is not a JSON object; skipped.`,
+        })
+      }
+    })
   return lines
 }
 
@@ -69,7 +76,7 @@ function mapLog(
     mapped.entries.forEach((draft, index) => {
       const entry = {
         ...draft,
-        id: `${mapped.recordId}:${index}`,
+        id: `${runId ?? "main"}:${line}:${index}`,
         recordId: mapped.recordId,
         parentId: previous,
         runId,
@@ -81,7 +88,19 @@ function mapLog(
       previous = entry.id
       entries.push(entry)
     })
-    if (previous) lastEntryOfRecord.set(mapped.recordId, previous)
+    if (previous && mapped.recordId !== null) {
+      if (lastEntryOfRecord.has(mapped.recordId)) {
+        // Children link to the first copy; a repeat must not re-route them.
+        warnings.push({
+          code: "duplicate-record",
+          line,
+          ...(runId ? { runId } : {}),
+          message: `Record ${mapped.recordId} on line ${line} repeats an earlier record id; its children link to the first copy.`,
+        })
+      } else {
+        lastEntryOfRecord.set(mapped.recordId, previous)
+      }
+    }
   }
 
   for (const { entry, parentRecordId } of pending) {
@@ -101,11 +120,16 @@ function mapLog(
   return { entries, sessionId }
 }
 
+// Logs may open with bookkeeping records that carry no ids, so look at the
+// first few records, not only the first.
+const DETECT_WITHIN = 20
+
 function detect(lines: Line[]): FormatAdapter {
-  const first = lines[0]?.record
-  const adapter = first && adapters.find((a) => a.detect(first))
-  if (!adapter) throw new UnsupportedFormatError(adapters.map((a) => a.name))
-  return adapter
+  for (const { record } of lines.slice(0, DETECT_WITHIN)) {
+    const adapter = adapters.find((a) => a.detect(record))
+    if (adapter) return adapter
+  }
+  throw new UnsupportedFormatError(adapters.map((a) => a.name))
 }
 
 export function parseSession(

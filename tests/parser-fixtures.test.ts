@@ -55,8 +55,10 @@ describe("session-jsonl adapter on small.jsonl", () => {
   it("gives each entry a unique id, its record, line, timestamp and raw record", () => {
     const ids = session.entries.map((e) => e.id)
     expect(new Set(ids).size).toBe(ids.length)
+    expect(session.entries.every((e) => typeof e.timestamp === "string")).toBe(
+      true,
+    )
     expect(session.entries[2]).toMatchObject({
-      id: "b0e4d565-1d53-4979-8f43-56ab3cee89bc:1",
       recordId: "b0e4d565-1d53-4979-8f43-56ab3cee89bc",
       line: 2,
       timestamp: "2025-03-04T09:15:12.070Z",
@@ -82,12 +84,17 @@ describe("session-jsonl adapter on small.jsonl", () => {
   })
 
   it("keeps the model message id, model and token usage on assistant entries", () => {
-    const [reasoning] = ofKind(session.entries, "reasoning")
-    expect(reasoning.message).toEqual({
-      id: "msg_cabd56ff9a67aafb6f89d064",
-      model: "example-model-1",
-      usage: { input: 139, output: 43, cacheCreation: 736, cacheRead: 2454 },
-    })
+    const record = session.entries.filter(
+      (e) => e.recordId === "b0e4d565-1d53-4979-8f43-56ab3cee89bc",
+    )
+    expect(kinds(record)).toEqual(["reasoning", "tool_call"])
+    for (const entry of record) {
+      expect("message" in entry && entry.message).toEqual({
+        id: "msg_cabd56ff9a67aafb6f89d064",
+        model: "example-model-1",
+        usage: { input: 139, output: 43, cacheCreation: 736, cacheRead: 2454 },
+      })
+    }
   })
 })
 
@@ -139,8 +146,16 @@ describe("session-jsonl adapter on with-subagents.jsonl", () => {
   const session = parseSession(read("with-subagents.jsonl"), { subagents })
 
   it("maps system and attachment records to their own kinds", () => {
-    expect(ofKind(session.entries, "system")).toHaveLength(1)
-    expect(ofKind(session.entries, "attachment")).toHaveLength(1)
+    const [system] = ofKind(session.entries, "system")
+    const [attachment] = ofKind(session.entries, "attachment")
+    expect(system).toMatchObject({
+      text: "Session started in sample-app",
+      subtype: "info",
+    })
+    expect(attachment.data).toMatchObject({
+      type: "file",
+      filename: "package.json",
+    })
   })
 
   it("turns a parallel-call record into two calls and its answer into two results", () => {
@@ -154,23 +169,34 @@ describe("session-jsonl adapter on with-subagents.jsonl", () => {
     expect(kinds(line7)).toEqual(["tool_result", "tool_result"])
     const calls = ofKind(line6, "tool_call").map((c) => c.callId)
     expect(ofKind(line7, "tool_result").map((r) => r.callId)).toEqual(calls)
+    expect(new Set(line6.map((e) => e.recordId)).size).toBe(1)
+    expect(line6[1].parentId).toBe(line6[0].id)
+    expect(line6[2].parentId).toBe(line6[1].id)
   })
 
-  it("keeps the shared message id on both halves of a split message", () => {
-    const ids = [8, 9].map(
-      (line) =>
-        session.entries.find(
-          (e) => e.line === line && e.runId === null && "message" in e,
-        ) as { message: { id: string } } | undefined,
+  it("keeps the shared message id on every block of both halves of a split message", () => {
+    const halves = session.entries.filter(
+      (e) => e.runId === null && (e.line === 8 || e.line === 9),
     )
-    expect(ids[0]?.message.id).toBeTruthy()
-    expect(ids[1]?.message.id).toBe(ids[0]?.message.id)
+    expect(new Set(halves.map((e) => e.line))).toEqual(new Set([8, 9]))
+    for (const e of halves) {
+      expect("message" in e && e.message.id).toBe(
+        "msg_344ef3f3cafe06aabe0fd292",
+      )
+    }
   })
 
-  it("keeps both sides of a branch with their shared parent", () => {
-    const branch = session.entries.filter((e) => e.line === 15 || e.line === 16)
-    const firsts = [15, 16].map((l) => branch.find((e) => e.line === l)!)
-    expect(firsts[0].parentId).toBe(firsts[1].parentId)
+  it("keeps both sides of a branch under their shared parent", () => {
+    const parentRecord = session.entries.filter(
+      (e) => e.recordId === "48b9ac10-5e8d-4ade-8fdf-b1da5a11620b",
+    )
+    const parent = parentRecord.at(-1)!.id
+    for (const line of [15, 16]) {
+      const first = session.entries.find(
+        (e) => e.line === line && e.runId === null,
+      )!
+      expect(first.parentId).toBe(parent)
+    }
   })
 
   it("includes subagent entries, attributed to the run the spawning call reported", () => {
@@ -183,9 +209,16 @@ describe("session-jsonl adapter on with-subagents.jsonl", () => {
         subagentRunId: run.id,
       })
       const runEntries = session.entries.filter((e) => e.runId === run.id)
-      expect(runEntries.length).toBeGreaterThan(0)
       expect(runEntries[0].parentId).toBeNull()
     }
+    for (const e of session.entries.filter((e) => e.runId !== null)) {
+      expect((e.raw as { agentId: string }).agentId).toBe(e.runId)
+    }
+    const linesPerRun = (id: string) =>
+      new Set(session.entries.filter((e) => e.runId === id).map((e) => e.line))
+        .size
+    expect(linesPerRun("8f003132b574f56b")).toBe(6)
+    expect(linesPerRun("c1710fb89ca16226")).toBe(10)
   })
 
   it("finds the failed tool call inside a subagent run", () => {
@@ -198,9 +231,9 @@ describe("session-jsonl adapter on with-subagents.jsonl", () => {
   it("warns when a spawned subagent's log is missing", () => {
     const mainOnly = parseSession(read("with-subagents.jsonl"))
     expect(mainOnly.entries.every((e) => e.runId === null)).toBe(true)
-    expect(mainOnly.warnings.map((w) => w.code)).toEqual([
-      "missing-subagent-log",
-      "missing-subagent-log",
+    expect(mainOnly.warnings.map((w) => [w.code, w.runId])).toEqual([
+      ["missing-subagent-log", "8f003132b574f56b"],
+      ["missing-subagent-log", "c1710fb89ca16226"],
     ])
   })
 
