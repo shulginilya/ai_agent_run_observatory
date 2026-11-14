@@ -28,4 +28,12 @@ describe("assertThrowawayDatabase", () => {
       assertThrowawayDatabase("postgres://u:p@host/app_test?sslmode=require"),
     ).not.toThrow()
   })
+
+  it("refuses a URL that overrides the database in its query string", () => {
+    expect(() =>
+      assertThrowawayDatabase(
+        "postgres://dev:dev@localhost/observatory_test?database=observatory",
+      ),
+    ).toThrow(/database/)
+  })
 })

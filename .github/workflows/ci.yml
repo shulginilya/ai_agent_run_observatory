@@ -47,11 +47,14 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
       - name: Migrations match schema
+        # drizzle-kit exits 0 even when it cannot ask about a rename without a
+        # terminal, so require its "no changes" line as well as a clean tree.
         run: |
-          pnpm db:generate
-          if [ -n "$(git status --porcelain drizzle/)" ]; then
+          out=$(pnpm db:generate 2>&1 </dev/null) || { echo "$out"; exit 1; }
+          echo "$out"
+          if ! echo "$out" | grep -q "No schema changes" || [ -n "$(git status --porcelain drizzle/)" ]; then
             git status --porcelain drizzle/
-            echo "::error::lib/db/schema.ts changed without a migration: run pnpm db:generate and commit drizzle/"
+            echo "::error::lib/db/schema.ts and drizzle/ differ: run pnpm db:generate and commit the migration"
             exit 1
           fi
       - name: Test

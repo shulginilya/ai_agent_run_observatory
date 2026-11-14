@@ -52,6 +52,13 @@ describe.skipIf(!url)(
 
     beforeAll(async () => {
       assertThrowawayDatabase(url ?? "")
+      // Ask the server too: connection options can name another database.
+      const [{ name }] = await sql`select current_database() as name`
+      if (!String(name).endsWith("_test")) {
+        throw new Error(
+          `Connected to "${name}", not a database ending in _test; refusing to drop its schema.`,
+        )
+      }
       await sql.unsafe(
         "drop schema if exists public cascade; drop schema if exists drizzle cascade; create schema public;",
       )
