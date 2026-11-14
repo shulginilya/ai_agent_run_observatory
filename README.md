@@ -27,11 +27,11 @@ Observatory turns a session file into something you can explore.
 
 ## Tech stack
 
-| Area | Choice |
-| --- | --- |
-| App | Next.js (App Router), TypeScript |
-| UI | Tailwind CSS, shadcn/ui |
-| Data | Postgres on Neon, Drizzle ORM |
-| Auth | Auth.js with GitHub sign-in |
-| Tests | Vitest (unit), Playwright (end-to-end) |
+| Area         | Choice                                                       |
+| ------------ | ------------------------------------------------------------ |
+| App          | Next.js (App Router), TypeScript                             |
+| UI           | Tailwind CSS, shadcn/ui                                      |
+| Data         | Postgres on Neon, Drizzle ORM                                |
+| Auth         | Auth.js with GitHub sign-in                                  |
+| Tests        | Vitest (unit), Playwright (end-to-end)                       |
 | CI / hosting | GitHub Actions, Vercel (preview deployment per pull request) |

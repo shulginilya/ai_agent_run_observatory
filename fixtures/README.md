@@ -31,12 +31,12 @@ One JSON object per line.
 
 ## Fixtures
 
-| File | Entries | Purpose |
-| --- | --- | --- |
-| `sessions/small.jsonl` | 10 | One prompt, thinking, four tool calls, a final reply. |
-| `sessions/with-subagents.jsonl` | 18 | Two subagents (files in `sessions/with-subagents/subagents/`); one subagent has a failed tool call. Also a `system` and an `attachment` entry, a parallel-call turn, a split assistant message and a branch (see below). |
-| `sessions/failed-tools.jsonl` | 14 | Three errored tool results, plus one final tool call with no result (the session ends mid-run). |
-| `sessions/edge-cases.jsonl` | 9 lines | One malformed (non-JSON) line, one unknown entry type (`telemetry-ping`), one assistant entry whose content is an empty text block followed by a text block (`stop_reason: null`), one assistant entry without `usage`. |
+| File                            | Entries | Purpose                                                                                                                                                                                                                  |
+| ------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sessions/small.jsonl`          | 10      | One prompt, thinking, four tool calls, a final reply.                                                                                                                                                                    |
+| `sessions/with-subagents.jsonl` | 18      | Two subagents (files in `sessions/with-subagents/subagents/`); one subagent has a failed tool call. Also a `system` and an `attachment` entry, a parallel-call turn, a split assistant message and a branch (see below). |
+| `sessions/failed-tools.jsonl`   | 14      | Three errored tool results, plus one final tool call with no result (the session ends mid-run).                                                                                                                          |
+| `sessions/edge-cases.jsonl`     | 9 lines | One malformed (non-JSON) line, one unknown entry type (`telemetry-ping`), one assistant entry whose content is an empty text block followed by a text block (`stop_reason: null`), one assistant entry without `usage`.  |
 
 Every `tool_use` id has exactly one later `tool_result`, except the interrupted
 call at the end of `failed-tools.jsonl`.
