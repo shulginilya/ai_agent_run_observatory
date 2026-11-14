@@ -414,3 +414,48 @@ describe("scale and loop edges", () => {
     expect(nodesOf(tree).filter((n) => n.brokenParent)).toHaveLength(1)
   })
 })
+
+describe("large hostile logs", () => {
+  it("pairs 50,000 id-less calls in linear time", () => {
+    const entries: Partial<Entry>[] = []
+    for (let i = 0; i < 50_000; i++) {
+      entries.push({
+        id: `c${i}`,
+        kind: "tool_call",
+        callId: "",
+        name: "T",
+        input: {},
+        parentId: i ? `r${i - 1}` : null,
+        message: { id: null, model: null, usage: null },
+      } as Partial<Entry>)
+      entries.push({
+        id: `r${i}`,
+        kind: "tool_result",
+        callId: "",
+        output: "",
+        isError: false,
+        subagentRunId: null,
+        parentId: `c${i}`,
+      } as Partial<Entry>)
+    }
+    const started = performance.now()
+    const tree = buildRunTree(session(entries)).main
+    // Linear pairing takes ~100 ms here; the quadratic version took ~7 s.
+    expect(performance.now() - started).toBeLessThan(2_000)
+    let node: TreeNode | undefined = tree.roots[0]
+    let paired = 0
+    while (node) {
+      if (node.pairing?.status === "ok") paired++
+      node = node.children[0]
+    }
+    expect(paired).toBe(50_000)
+  })
+
+  it("handles one entry with 200,000 children", () => {
+    const entries: Partial<Entry>[] = [{ id: "root" }]
+    for (let i = 0; i < 200_000; i++)
+      entries.push({ id: `k${i}`, parentId: "root" })
+    const tree = buildRunTree(session(entries)).main
+    expect(tree.roots[0].children).toHaveLength(200_000)
+  })
+})
