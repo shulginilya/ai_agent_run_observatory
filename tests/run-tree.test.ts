@@ -383,3 +383,34 @@ describe("hostile shapes", () => {
     expect(results.every((n) => !n.orphan)).toBe(true)
   })
 })
+
+describe("scale and loop edges", () => {
+  it("builds a 10,000-entry chain without running out of stack", () => {
+    const entries = Array.from({ length: 10_000 }, (_, i) => ({
+      id: `e${i}`,
+      parentId: i === 0 ? null : `e${i - 1}`,
+    }))
+    const tree = buildRunTree(session(entries)).main
+    let depth = 0
+    for (let n: TreeNode | undefined = tree.roots[0]; n; n = n.children[0])
+      depth++
+    expect(depth).toBe(10_000)
+  })
+
+  it("cuts a loop at a member, not at a child hanging off it", () => {
+    const tree = buildRunTree(
+      session([
+        { id: "c", parentId: "b" },
+        { id: "a", parentId: "b" },
+        { id: "b", parentId: "a" },
+      ]),
+    ).main
+    expect(tree.roots.map((n) => n.entry.id)).toEqual(["a"])
+    expect(tree.roots[0].brokenParent).toBe(true)
+    expect(tree.roots[0].children.map((n) => n.entry.id)).toEqual(["b"])
+    expect(tree.roots[0].children[0].children.map((n) => n.entry.id)).toEqual([
+      "c",
+    ])
+    expect(nodesOf(tree).filter((n) => n.brokenParent)).toHaveLength(1)
+  })
+})
