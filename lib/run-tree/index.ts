@@ -79,7 +79,7 @@ function buildRun(
       const node = stack.pop()!
       if (reached.has(node)) continue
       reached.add(node)
-      stack.push(...node.children)
+      for (const child of node.children) stack.push(child)
     }
   }
   roots.forEach(reach)
@@ -132,11 +132,17 @@ function buildRun(
     list.push(node)
     callsById.set(node.entry.callId, list)
   }
+  // Calls of one id are paired earliest first, so everything before the
+  // cursor is already paired: start there instead of rescanning the list.
+  const cursor = new Map<string, number>()
   for (const node of nodes.values()) {
     if (node.entry.kind !== "tool_result") continue
-    const call = callsById
-      .get(node.entry.callId)
-      ?.find((c) => !c.pairing && order.get(c)! < order.get(node)!)
+    const id = node.entry.callId
+    const list = callsById.get(id)
+    const at = cursor.get(id) ?? 0
+    const next = list?.[at]
+    const call = next && order.get(next)! < order.get(node)! ? next : undefined
+    if (call) cursor.set(id, at + 1)
     if (!call) {
       node.orphan = true
       continue
