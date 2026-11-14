@@ -1,23 +1,9 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeAll, beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 
 import Home from "@/app/page"
 import { ThemeProvider } from "@/components/theme-provider"
-
-beforeAll(() => {
-  window.matchMedia = (query: string) =>
-    ({
-      matches: false,
-      media: query,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      addListener: () => {},
-      removeListener: () => {},
-      dispatchEvent: () => false,
-      onchange: null,
-    }) as MediaQueryList
-})
 
 beforeEach(() => {
   localStorage.clear()
